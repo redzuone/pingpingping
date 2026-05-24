@@ -1,0 +1,21 @@
+[project]
+name = "pingpingping"
+version = "0.1.0"
+description = "Network monitoring tool - ping, TCP/UDP client/server"
+readme = "README.md"
+requires-python = "==3.14.0"
+dependencies = [
+    "loguru==0.7.3",
+    "pyside6==6.11.1",
+    "qt-themes==0.4.0",
+    "qtpy==2.4.3",
+    "tzdata==2025.3",
+]
+
+[dependency-groups]
+dev = [
+    "mypy==2.1.0",
+    "pre-commit==4.6.0",
+    "pyinstaller==6.20.0",
+    "ruff==0.15.14",
+]
