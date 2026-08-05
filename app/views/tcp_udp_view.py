@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Slot
+from typing import Callable
+
+from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import (
     QComboBox,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
     QSpinBox,
+    QSplitter,
     QVBoxLayout,
     QWidget,
 )
@@ -35,6 +37,7 @@ class _ConnectionInstanceWidget(QWidget):
         tcp_service: TcpService,
         udp_service: UdpService,
         presets: list[QuickSendPreset] | None = None,
+        on_presets_changed: Callable[[list[QuickSendPreset]], None] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -45,8 +48,9 @@ class _ConnectionInstanceWidget(QWidget):
         self._connection_id = f'{protocol}_{mode}_{id(self)}'
         self._is_connected = False
         self._presets = presets or []
+        self._on_presets_changed = on_presets_changed
 
-        self._build_ui(title)
+        self._build_ui()
 
         # Connect service signals
         if protocol == 'tcp':
@@ -73,32 +77,21 @@ class _ConnectionInstanceWidget(QWidget):
             self._udp_service.server_data_sent.connect(self._on_data_sent)
             self._udp_service.server_error.connect(self._on_error)
 
-    def _build_ui(self, title: str) -> None:
+    def _build_ui(self) -> None:
         main_layout = QVBoxLayout(self)
 
-        # Title and mode
-        title_layout = QHBoxLayout()
-        title_label = QLabel(f'<b>{title}</b>')
-        title_label.setStyleSheet('font-size: 13px;')
-        title_layout.addWidget(title_label)
-
-        mode_label = QLabel(f'({self._protocol.upper()} {self._mode})')
-        mode_label.setStyleSheet('color: #888;')
-        title_layout.addWidget(mode_label)
-        title_layout.addStretch()
-
-        main_layout.addLayout(title_layout)
-
         # Connection config
-        config_group = QGroupBox('Connection')
-        config_layout = QHBoxLayout(config_group)
+        config_layout = QHBoxLayout()
 
         self._host_input = QLineEdit()
         self._host_input.setPlaceholderText('Host/IP')
+        self._host_input.setText('127.0.0.1')
 
         self._port_spin = QSpinBox()
         self._port_spin.setRange(1, 65535)
         self._port_spin.setValue(8080)
+        self._port_spin.setMaximumWidth(80)
+        self._port_spin.setToolTip('Port')
 
         self._connect_btn = QPushButton('Connect' if self._mode == 'client' else 'Start')
         self._connect_btn.clicked.connect(self._on_connect)
@@ -110,62 +103,66 @@ class _ConnectionInstanceWidget(QWidget):
         self._connection_status = QLabel('● Disconnected')
         self._connection_status.setStyleSheet('color: #888;')
 
-        config_layout.addWidget(QLabel('Host:'))
         config_layout.addWidget(self._host_input, 1)
-        config_layout.addWidget(QLabel('Port:'))
         config_layout.addWidget(self._port_spin)
         config_layout.addWidget(self._connect_btn)
         config_layout.addWidget(self._disconnect_btn)
         config_layout.addWidget(self._connection_status)
 
-        main_layout.addWidget(config_group)
+        main_layout.addLayout(config_layout)
 
         # Quick send presets
         self._quick_send = QuickSendPresetsWidget(
             presets=self._presets,
             on_send=self._send_data,
+            on_change=self._on_presets_changed,
         )
-        main_layout.addWidget(self._quick_send)
 
-        # Send area
-        send_group = QGroupBox('Send Data')
-        send_layout = QVBoxLayout(send_group)
-
-        send_controls = QHBoxLayout()
         self._send_input = QPlainTextEdit()
-        self._send_input.setMaximumHeight(60)
         self._send_input.setPlaceholderText('Type message or hex here...')
+
+        # Top pane: quick-send list + send input on the left, shared controls on the right
+        top_widget = QWidget()
+        top_layout = QHBoxLayout(top_widget)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+
+        left_column = QVBoxLayout()
+        left_column.addWidget(self._quick_send)
+        left_column.addWidget(self._send_input, 1)
+        top_layout.addLayout(left_column, 1)
+
+        right_column = QVBoxLayout()
+        right_column.addWidget(self._quick_send.add_button)
 
         self._send_mode_combo = QComboBox()
         self._send_mode_combo.addItems(['Text (UTF-8)', 'Hex'])
-        send_controls.addWidget(QLabel('Mode:'))
-        send_controls.addWidget(self._send_mode_combo)
+        self._send_mode_combo.setCurrentIndex(1)  # default to Hex
+        right_column.addWidget(self._send_mode_combo)
 
         self._send_btn = QPushButton('Send')
         self._send_btn.setEnabled(False)
         self._send_btn.clicked.connect(self._on_send)
-        send_controls.addWidget(self._send_btn)
+        right_column.addWidget(self._send_btn)
 
         self._clear_send_btn = QPushButton('Clear')
         self._clear_send_btn.clicked.connect(lambda: self._send_input.clear())
-        send_controls.addWidget(self._clear_send_btn)
+        right_column.addWidget(self._clear_send_btn)
 
-        send_layout.addWidget(self._send_input)
-        send_layout.addLayout(send_controls)
-
-        main_layout.addWidget(send_group)
-
-        # Packet log
-        log_group = QGroupBox('Packet Log')
-        log_layout = QVBoxLayout(log_group)
         self._packet_log = PacketLogWidget()
-        log_layout.addWidget(self._packet_log)
-
         self._clear_log_btn = QPushButton('Clear Log')
         self._clear_log_btn.clicked.connect(self._packet_log.clear_log)
-        log_layout.addWidget(self._clear_log_btn)
+        right_column.addWidget(self._clear_log_btn)
+        right_column.addStretch()
 
-        main_layout.addWidget(log_group, 1)
+        top_layout.addLayout(right_column)
+
+        # Resizable splitter between the top pane and the packet log
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.addWidget(top_widget)
+        splitter.addWidget(self._packet_log)
+        splitter.setSizes([220, 400])
+
+        main_layout.addWidget(splitter, 1)
 
     def get_presets(self) -> list[QuickSendPreset]:
         return self._quick_send.get_presets()
@@ -405,10 +402,14 @@ class TcpUdpView(QWidget):
             inst.set_presets(presets)
 
     def get_all_presets(self) -> list[QuickSendPreset]:
-        """Get all presets (uses first instance's presets as canonical)."""
-        if self._instances:
-            return self._instances[0].get_presets()
+        """Get all presets."""
         return self._global_presets
+
+    def _on_instance_presets_changed(self, presets: list[QuickSendPreset]) -> None:
+        """Keep all instances and the global preset list in sync when one changes."""
+        self._global_presets = presets
+        for inst in self._instances:
+            inst.set_presets(presets)
 
     @Slot()
     def _on_add_instance(self) -> None:
@@ -423,7 +424,8 @@ class TcpUdpView(QWidget):
             mode=mode,
             tcp_service=self._tcp_service,
             udp_service=self._udp_service,
-            presets=list(self._global_presets),
+            presets=self._global_presets,
+            on_presets_changed=self._on_instance_presets_changed,
         )
 
         self._instances.append(instance)

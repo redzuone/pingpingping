@@ -114,33 +114,33 @@ class QuickSendPresetsWidget(QWidget):
         self,
         presets: list[QuickSendPreset] | None = None,
         on_send: Callable[[bytes], None] | None = None,
+        on_change: Callable[[list[QuickSendPreset]], None] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._presets: list[QuickSendPreset] = presets or []
         self._on_send_callback = on_send
+        self._on_change_callback = on_change
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        header_layout = QHBoxLayout()
-        header_label = QLabel('Quick Send')
-        header_label.setStyleSheet('font-weight: bold;')
-        header_layout.addWidget(header_label)
-        header_layout.addStretch()
-
+        # The add-preset button is created here but not placed in this widget's
+        # own layout — the parent view places it wherever fits its layout best.
         self._add_btn = QPushButton('+')
         self._add_btn.setFixedWidth(30)
         self._add_btn.setToolTip('Add a new preset')
         self._add_btn.clicked.connect(self._on_add_preset)
-        header_layout.addWidget(self._add_btn)
-
-        layout.addLayout(header_layout)
 
         self._preset_list = QListWidget()
         self._preset_list.setMaximumHeight(200)
         self._update_list()
         layout.addWidget(self._preset_list)
+
+    @property
+    def add_button(self) -> QPushButton:
+        """The 'add preset' button, for the parent to place in its own layout."""
+        return self._add_btn
 
     def set_on_send_callback(self, callback: Callable[[bytes], None]) -> None:
         """Set the callback for when a preset is clicked to send."""
@@ -201,6 +201,7 @@ class QuickSendPresetsWidget(QWidget):
             if preset:
                 self._presets.append(preset)
                 self._update_list()
+                self._notify_change()
 
     def _on_edit_preset_at(self, idx: int) -> None:
         if idx < 0 or idx >= len(self._presets):
@@ -212,11 +213,17 @@ class QuickSendPresetsWidget(QWidget):
             if new_preset:
                 self._presets[idx] = new_preset
                 self._update_list()
+                self._notify_change()
 
     def _on_delete_preset_at(self, idx: int) -> None:
         if 0 <= idx < len(self._presets):
             self._presets.pop(idx)
             self._update_list()
+            self._notify_change()
+
+    def _notify_change(self) -> None:
+        if self._on_change_callback is not None:
+            self._on_change_callback(self._presets)
 
     def _on_send_preset(self, preset: QuickSendPreset) -> None:
         if self._on_send_callback is None:
